@@ -1,0 +1,353 @@
+---
+title: "SCOP_2021_0177: Transcriptomic analysis of DNA methylation edited mouse neural stem cells"
+author: 
+- "Analysis by Thomas Gade Koefoed"
+- "Staff Scientist at the Single-Cell Omics Platform"
+- "thomas.koefoed@sund.ku.dk"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+knit: (function (...) {
+        rmarkdown::render(
+          basename(rstudioapi::getSourceEditorContext()$path), 
+          output_file = paste(
+            format(Sys.time(),'%Y_%m_%d'),
+            tools::file_path_sans_ext(basename(rstudioapi::getSourceEditorContext()$path)),
+            sep="_"), 
+          envir = new.env())})
+output:
+   html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    code_folding: hide
+    df_print: paged
+editor_options:
+  chunk_output_type: inline
+---
+
+# Code blocks: Initial data processing {.tabset}
+All code used for the analyses can be found throughout this report by expanding the code-blocks in the .html-file on the right-hand side within the appropriate tabs, or through the associated .Rmd file, where it can also be run. You will have to install all the necessary packages yourself though, which can be non-trivial.
+
+## Libraries
+```{r, warning=FALSE, message=FALSE, results="hide"}
+suppressPackageStartupMessages({
+  library('biomaRt') # downloading gene data
+  library("DT") # for pretty printing of paged tables
+  library("limma") # RNA-seq analysis
+  library("edgeR") # RNA-seq analysis
+  library("DESeq2") # RNA-seq analysis
+  library("here") # Better structure and relative paths
+  library("GO.db") # downloading gene data
+  library("org.Mm.eg.db")
+  library("cbmr") # in-house convenience functions
+  library("AnnotationDbi")
+  library("ggrepel")
+  # library("sva")
+  # library("DESeq2")
+  library("RUVSeq")
+  library("tidyverse") # general data manipulation
+})
+
+full_script_name <- rstudioapi::getSourceEditorContext()$path
+script_name <- basename(full_script_name)
+data_dir <- paste0(tools::file_path_sans_ext(full_script_name),"_data/")
+dir.create(data_dir, showWarnings = F)
+```
+
+
+## General data processing
+```{r, message = FALSE, class.source = 'fold-show'}
+# load data
+g_counts_raw <- readRDS("../data-raw/salmon.merged.gene_counts.rds")
+rna_counts_all <- g_counts_raw %>% assays() %>% .$counts
+
+# fix sample IDS in count matrix
+colnames(rna_counts_all) <- 
+  sub(pattern = "X[0-9]{4}_", replacement = "", x = colnames(rna_counts_all)) %>% 
+  sub(pattern = "_S[0-9]{1,2}", replacement = "", x=.)
+
+# fix sample IDS in meta data sheet
+meta_data_sheet <- readxl::read_excel("0177_metadata.xlsx") %>%
+  transmute(`Sample.ID`=sub(pattern = ".....", replacement = "", x=`Sample ID (Library ID)`), 
+            gRNA = factor(gsub(x = Condition1, pattern = "g|gRNA_", replacement = ""), levels=c("EV", "PTPRK", "PHOX2B")),
+            Media = factor(gsub(x = Condition2, pattern = "_media", replacement = ""), levels=c("proliferation","differentiation")),
+            Extraction=factor(`Extraction pool (A,B,C)`, levels=c("A", "B", "C", "D", "E")),
+            Replicate=factor(gsub(`Condition 3`, pattern="replicate_", replacement = ""), levels=c("1","2","3")),
+            Observed_batch=factor(Comments)) %>%
+  as.data.frame()
+
+#Create DGE list of relevant samples
+rna_counts <- rna_counts_all[, as.character(c(1:18))]
+
+y <- DGEList(rna_counts, 
+             group = meta_data_sheet$Observed_batch,
+             samples=meta_data_sheet)
+
+design <-  model.matrix(~0 + group, data=y$samples)
+
+idx_expressed <- filterByExpr(y, design = design)
+y <- y[idx_expressed, ]
+y <- calcNormFactors(y)
+
+# Calculate CPM and print
+log_cpm <- cpm(y, log=T)
+saveRDS(object =log_cpm, file=paste0(data_dir, 
+                                           "log_CPM_values_ensembl_ID_by_sample.RDS"))
+write_tsv(x = as.data.frame(log_cpm),
+                  file=paste0(data_dir, "log_CPM_values_ensembl_ID_by_sample.tsv"))
+```
+
+## Get gene info
+```{r, class.source = 'fold-show'}
+# Get Description, external gene name via Ensembl/biomaRt
+# mart <- useDataset("mmusculus_gene_ensembl", useMart("ensembl"))
+# saveRDS(mart, file=paste0("shared_data/", "mouse_mart.RDS"))
+mart <-  readRDS(file = paste0("shared_data/", "mouse_mart.RDS"))
+
+gene_info_list <- getBM(filters= "ensembl_gene_id", 
+                        attributes= c("ensembl_gene_id", "external_gene_name","description"),
+                        values=rownames(y),
+                        mart=mart)
+
+# get names via org.Mm.eg.db
+gene_names <- mapIds(x = org.Mm.eg.db,
+                     keys = rownames(y),
+                     column = "SYMBOL",
+                     keytype = "ENSEMBL", 
+                     multiVals = "first")
+
+# uncorrected
+log_cpm_with_names <- log_cpm
+rownames(log_cpm_with_names) <- gene_names
+
+saveRDS(object=log_cpm_with_names, file = paste0(data_dir, "log_CPM_values_gene_name_by_sample.RDS"))
+
+write_tsv(x = as.data.frame(log_cpm_with_names),
+                  file =paste0(data_dir, "log_CPM_values_gene_name_by_sample.tsv"))
+```
+
+## EdgeR differential gene expression
+```{r, class.source = 'fold-show'}
+y <- estimateDisp(y, design = design)
+fit <- glmQLFit(y, design = y$design, robust = TRUE)
+
+contrast_matrix <- makeContrasts(batch_effect=groupA-groupB,
+                                 levels=design)
+
+all_genes_test_full_info <- list()
+for (contrast in colnames(contrast_matrix)) {
+  all_genes_test <- edgeR_tester(contrast_matrix = contrast_matrix, contrast=contrast, efit = fit)
+  all_genes_test_full_info[[contrast]] <-  merge(x=all_genes_test, 
+                                                 y=gene_info_list, 
+                                                 by.x = "ENSEMBL", by.y="ensembl_gene_id",
+                                                 all.x=T)
+}
+
+# print tsv-tables:
+for (contrast in colnames(contrast_matrix)) {
+  all_genes_test_full_info[[contrast]] %>% write_tsv(file=paste0(data_dir, contrast,"_DGE_analysis.tsv"))
+}
+```
+
+## Gene ontology analysis
+
+```{r, class.source = 'fold-show'}
+GO_terms <- get_enrichment_terms(org_db = org.Mm.eg.db, ensembl_ids = rownames(y),
+                                 min_genes = 5, max_genes = 500)$BP
+
+ontology_tests <- run_ontology_tests(GO_terms, 
+                                     y, 
+                                     contrast_matrix = contrast_matrix, 
+                                     fun=limma::camera)
+
+for (contrast in colnames(contrast_matrix)) {
+  ontology_tests[[contrast]] %>% write_tsv(file=paste0(data_dir, contrast,"_GO_analysis.tsv"))
+}
+```
+
+## Session-info
+```{r}
+sessionInfo()
+```
+
+# Initial assessment of data quality {.tabset}
+```{r}
+n_samples <- nrow(meta_data_sheet)
+n_genes <-nrow(y)
+n_counts_per_sample <- colSums(rna_counts)
+n_counts_total <-  sum(n_counts_per_sample)
+n_counts_per_gene_per_sample <- (n_counts_total/n_genes)/n_samples
+```
+
+From the sequencing, we obtain `r I(n_genes)` genes that are expressed in a appreciable amount across the samples to be used for our downstream analyses. With a final, filtered transcript count of `r I(round(n_counts_total/1E+06))` million across the `r I(n_samples)` samples, we have an average of `r I(round(n_counts_per_gene_per_sample))` RNA-transcripts for each gene in each sample. 
+
+Check out the tabs below to see various QC-visualizations of the data:
+
+## Multiple dimensional scaling (MDS) heatmap
+
+The images below shows heatmaps of the log-normalized distances between each possible sample-pair with more similar pairs having negative values, and less similar pairs having positive values. Here, we can see that the samples seem to cluster based on genotype, but not as much on treatment.
+
+```{r}
+annotation_col_df <-  dplyr::select(meta_data_sheet, gRNA, Extraction)
+rownames(annotation_col_df) <- meta_data_sheet$Sample.ID
+
+annotation_row_df <-  dplyr::select(meta_data_sheet, Media)
+rownames(annotation_row_df) <- meta_data_sheet$Sample.ID
+
+plot_sample_heatmap(log_cpm,
+                    method="MDS",
+                    labels_col = meta_data_sheet$Sample.ID,
+                    labels_row = meta_data_sheet$Sample.ID,
+                    annotation_col = annotation_col_df[c("gRNA", "Extraction")],
+                    annotation_row = annotation_row_df["Media"],
+                    display_numbers=T,
+                    fontsize_number=6,
+                    main="Multiple dimensional scaling (MDS) heatmap"
+)
+```
+
+
+## Multi-dimensional scaling plot
+The figures below show the location of the samples in reduced 2-dimensional space.
+
+```{r}
+ggplot_mds(y = y, 
+           dim_plot = c(1,2),
+           size=1,
+           colour_by = y$samples$Media) +
+  ggtitle("MDS-plot colored by Media (Dimensions 1 & 2)") + 
+  aes(label = rownames(y$samples)) +
+  geom_label_repel()
+
+ggplot_mds(y = y, 
+           dim_plot = c(3,4),
+           size=1,
+           colour_by = y$samples$Media) +
+  ggtitle("MDS-plot colored by Media (Dimensions 3 & 4)") + 
+  aes(label = rownames(y$samples)) +
+  geom_label_repel()
+
+ggplot_mds(y = y, 
+           dim_plot = c(1,2),
+           colour_by = y$samples$gRNA,
+           size=1) +
+  ggtitle("MDS-plot colored by gRNA") + 
+  aes(label = rownames(y$samples)) +
+  geom_label_repel()
+```
+
+## MD-plots
+The plots below show the log2-fold change in gene expression for all genes in each sample, compared to the rest of the samples. Here, we see the typical distribution with only a few outliers.
+
+```{r}
+withr::with_par(list(mfrow = c(2, 3)), {
+  for (i in seq_len(ncol(y))) {
+    edgeR::plotMD.DGEList(y, column = i,cex.lab=1)
+    graphics::abline(h = 0)
+  }
+})
+```
+
+
+# Analysis results
+## The investigated *contrasts* and their P-value distributions
+Throughout the analysis-section, you will see tables containing the differential gene expression analysis results as well as the gene-ontology enrichment results for the different contrasts, or groupings, as outlined below:
+
+1. Untreated 5xFAD hemizygote vs WT-mice (hemi_control_vs_WT)
+2. JOP85-treated 5xFAD hemizygote vs WT-mice (PHOX2B_vs_EV_differentiation)
+3. JOP85-treated vs untreated 5xFAD hemizygote mice (PTPRK_vs_EV_proliferation)
+
+Below is shown the resulting, unadjusted P-value distribution from differential gene expression testing for each contrast:
+```{r}
+withr::with_par(list(mfrow = c(1,3)),
+                {for (contrast in colnames(contrast_matrix)) {
+                  hist(all_genes_test_full_info[[contrast]]$PValue,
+                       main = contrast, xlab = "P-value") }}
+)
+```
+
+In the following sections, you can order the rows in the tables as you wish by directly interacting with the tables. Similarly, you can search for specific genes or GO-terms, limit the data-ranges and download the data as excel and csv-files. (Copies of the full tables are already found in the corresponding data directory, since searching in the full tables here can be a bit slow).
+
+The gene ontology analysis investigates if some gene ontology terms are over-represented among the up-regulated and down-regulated genes respectively to investigate if specific biological processes are up- or down-regulated.
+
+
+## PHOX2B vs EV with proliferation media
+
+### Differential gene expression {.tabset}
+
+#### Significant genes (FDR<0.05)
+```{r, warning=FALSE, message=FALSE}
+all_genes_test_full_info[["batch_effect"]] %>% 
+  filter(FDR<0.05) %>% 
+  transmute(Gene = external_gene_name,
+            ENSEMBL_ID = rownames(all_genes_test_full_info),
+            description,
+            logFC=round(logFC,2),
+            PValue=round(PValue,2),
+            FDR=round(FDR,5)) %>% 
+  DT::datatable(extensions = 'Buttons', filter="top", rownames = FALSE, options = list(
+    dom = 'Bfrtip',buttons = c('copy', 'csv', 'excel', 'colvis')))
+```
+
+#### All genes
+```{r, warning=FALSE, message=FALSE}
+all_genes_test_full_info[["batch_effect"]] %>% 
+  transmute(Gene = external_gene_name, 
+            ENSEMBL_ID = rownames(all_genes_test_full_info),
+            description,
+            logFC=round(logFC,2),
+            PValue=round(PValue,2),
+            FDR=round(FDR,5)) %>% 
+  DT::datatable(extensions = 'Buttons', filter="top", rownames = FALSE, options = list(
+    dom = 'Bfrtip',buttons = c('copy', 'csv', 'excel', 'colvis')))
+```
+
+#### Volcano-plot
+```{r}
+plot_volcano <- function(contrast){
+  df <- all_genes_test_full_info[[contrast]]
+  allLogFc <- df[["logFC"]]
+  minLogFc <- min(allLogFc)
+  maxLogFc <- max(allLogFc)
+  minPval <- max(-log10(df[["PValue"]]))
+  maxPval <- 0
+  ggplot(df, aes(x = logFC, 
+                 y = -log10(PValue), 
+                 colour = FDR < 0.05
+  )
+  ) + 
+    geom_point(size=0.5, alpha=0.2) +
+    scale_color_manual(values = c("TRUE" = "red", "FALSE" = "black"), name="Significance", labels = c("TRUE" = "FDR < 0.05", "FALSE" = "FDR ≥ 0.05"), breaks = c("TRUE", "FALSE")) +
+    ylab(expression(paste(-log[10], "(P-value)"))) +
+    xlab(expression(paste(log[2], "(Fold Change)"))) +
+    scale_x_continuous(limits = c(minLogFc, maxLogFc)) +
+    scale_y_continuous(limits = c(maxPval, minPval)) +
+    theme_bw()
+}
+
+plot_volcano("batch_effect")
+```
+
+### Gene ontology analysis {.tabset}
+
+#### Significant GO-terms (FDR<0.5)
+
+```{r}
+ontology_tests[["batch_effect"]] %>% 
+  filter(FDR<0.05) %>%
+  transmute(ID, 
+            Direction=as.factor(Direction), 
+            TERM, 
+            `#genes`=NGenes, 
+            PValue=round(PValue,2),
+            FDR=round(FDR, 5)) %>% 
+  DT::datatable(extensions = 'Buttons', filter="top", rownames = FALSE, options = list(
+    dom = 'Bfrtip',buttons = c('copy', 'csv', 'excel', 'colvis')))
+```
+
+#### All GO-terms
+```{r, warning=FALSE}
+ontology_tests[["batch_effect"]] %>% 
+  transmute(ID, Direction=as.factor(Direction), TERM, `#genes`=NGenes, PValue=round(PValue,2),FDR=round(FDR, 5)) %>% 
+  DT::datatable(extensions = 'Buttons', filter="top", rownames = FALSE, options = list(
+    dom = 'Bfrtip',buttons = c('copy', 'csv', 'excel', 'colvis')))
+```
