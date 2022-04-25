@@ -1,4 +1,4 @@
-# Bulk_RNA_seq_analysis_template
+# Bulk mRNA-seq analysis template using EdgeR
 
 A template for analyzing a Universal Plus mRNA-seq with Nuquant project using EdgeR.
 
@@ -22,10 +22,10 @@ The analysis itself is written in the form a .Rmd-file, which contains both code
 
 2.  Sanitize it by removing all non-relevant files for the user. But it should still be able to run perfectly (except if missing raw-data in the case that it is large and stored in the outer data-raw folder).
 
-3.  Append the date-of-handin to the folder-name
+3.  Append the date-of-hand-in to the folder-name
 
 4.  Zip it
 
-5.  Send via e-mail or filesender
+5.  Send via e-mail if possible, else via filesender
 
-6.  Upload a local copy of the whole directory to the relevant project-dir with data appended to it
+6.  Upload a local copy of the whole directory to the relevant project-dir with date of hand-in appended to it
