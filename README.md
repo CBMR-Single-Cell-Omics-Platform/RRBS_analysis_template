@@ -2,3 +2,4 @@
  
 A template for analyzing a mRNA-seq project.
 
+The analysis itself takes place in yes..
