@@ -5,15 +5,10 @@ A template for analyzing a Universal Plus mRNA-seq with Nuquant project using Ed
 The analysis itself is written in the form a .Rmd-file, which contains both code and interactive output for the user.
 
 **Contents:**
-
 -   **data-raw:** This is where the raw transcript/gene counts are stored. Can be large files, which is not meant to be uploaded to the user, but only used for the analyses. Is by default ignored by git to prevent large files being uploaded.
-
 -   **SCOP_2022_XXXX:** This is the local working directory where the actual analysis takes place. If more tissues/analyses are made, there will be several relevant sub-directories of this.
-
     -   **analysis.Rmd:** The template .Rmd-analysis, which contains basic analysis routine. When you knit the file, an .html-output with the corresponding name and today's date will be automatically generated, as well as a directory containing relevant outputs tied to the analysis.
-
     -   **data-raw:** Similar to the data directory another-level up, but is meant to be used if the raw data is managable in size so that the full analysis can be run by the user.
-
 -   **old_or_extra:** Mean to store stuff in if the working directory gets cluttered, but you don't want to delete stuff.
 
 **Upon completion of analysis:**
