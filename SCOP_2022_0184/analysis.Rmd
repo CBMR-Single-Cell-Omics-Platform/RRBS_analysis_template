@@ -31,6 +31,11 @@ All code used for the analyses can be found throughout this report by expanding 
 ## Libraries
 
 ```{r, warning=FALSE, message=FALSE, results="hide"}
+full_script_name <- rstudioapi::getSourceEditorContext()$path
+script_name <- basename(full_script_name)
+data_dir <- paste0(tools::file_path_sans_ext(full_script_name),"_data/")
+dir.create(data_dir, showWarnings = F)
+
 suppressPackageStartupMessages({
   library('biomaRt') # downloading gene data
   library("DT") # for pretty printing of paged tables
@@ -46,10 +51,6 @@ suppressPackageStartupMessages({
   library("tidyverse") # general data manipulation
 })
 
-full_script_name <- rstudioapi::getSourceEditorContext()$path
-script_name <- basename(full_script_name)
-data_dir <- paste0(tools::file_path_sans_ext(full_script_name),"_data/")
-dir.create(data_dir, showWarnings = F)
 ```
 
 ## General data processing
@@ -163,8 +164,23 @@ ontology_tests <- run_ontology_tests(GO_terms,
                                      contrast_matrix = contrast_matrix, 
                                      fun=limma::camera)
 
+# get gene names for each GO-term
+ontology_gene_names <- lapply(GO_terms$index,
+                              plyr::mapvalues,
+                              from = names(gene_names),
+                              to=gene_names, 
+                              warn_missing=F)
+
+
+ontology_gene_names_df <- ontology_gene_names %>% 
+  lapply(paste, collapse=", ") %>% 
+  unlist() %>% 
+  enframe(name = "ID", value = "Genes")
+
 for (contrast in colnames(contrast_matrix)) {
-  ontology_tests[[contrast]] %>% write_tsv(file=paste0(data_dir, contrast,"_GO_analysis.tsv"))
+  ontology_tests[[contrast]] %>% 
+    left_join(ontology_gene_names_df) %>% 
+    write_tsv(file=paste0(data_dir, contrast,"_GO_analysis.tsv"))
 }
 ```
 
