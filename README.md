@@ -35,3 +35,4 @@ The analysis itself is written in the form a .Rmd-file, which contains both code
 5.  Send via e-mail if possible, else via filesender
 6.  Upload a local copy of the whole directory to the relevant project-dir with date of hand-in appended to it
 7.  Move card on Trello
+ #add this
