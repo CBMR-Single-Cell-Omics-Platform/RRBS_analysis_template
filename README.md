@@ -1,8 +1,8 @@
-# RRBS analysis template using Biseq ---under construction---
+# RRBS analysis template using Biseq
 
-A template for analyzing a Universal Plus mRNA-seq with Nuquant using EdgeR.
+A template for analyzing RRBS results using Bismark & BiSeq.
 
-The analysis itself is written in the form a .Rmd-file, which contains both code and interactive output for the user.
+The main analysis itself is written in the form a .Rmd-file, which contains both code and interactive output for the user.
 
 **Purpose and contents of directories in this repository:**
 
@@ -18,13 +18,17 @@ The analysis itself is written in the form a .Rmd-file, which contains both code
 
 **Pre-processing steps before analysis:**
 
-1.  On Yggdrasil, copy sequencing folder (name found in Trello) from seq-drive to SCOP-project dir (when mounted)
-    -   `cp /data/SCOP/seq3/tqb695/XXXXXXXXX /data/SCOP/SCOP_2022_0XXX/tqb695/RNAseq/01_BCL/`
-2.  Move 01_BCL/SampleSheet.csv into sequencing folder
-3.  `cd` into sequencing folder and run `bcl2fastq.sh`
-4.  `cd` into fastq-directory and run multiqc: `conda activate tools & multiqc .` & investigate
-5.  Run `add_umi.sh` & `fastq_dir_to_samplesheet.sh`
-6.  Edit the `nextflow.sh` pipeline and run it
+1.  On Yggdrasil/Nidhogg, Move 01_BCL/SampleSheet.csv into sequencing folder
+2.  copy sequencing folder (name found in Trello) from seq-drive to SCOP-project dir (when mounted) as well as computerome
+    -   mount: `mount_SCOP_share SCOP_2022_0XXX`
+    -   CP to project dir `cp /data/SCOP/seq3/tqb695/XXXXXXXX /data/SCOP/SCOP_2022_0XXX/tqb695/RNAseq/01_BCL/`
+    -   create folder on computerome `ssh thokoe@ssh.computerome.dk 'mkdir -p /home/projects/scratch/ku_00016/SCOP_2022_0XXX'`
+    -   cp to computerome: `scp /data/SCOP/seq3/tqb695/XXXXXXXXX thokoe@ssh.computerome.dk:/home/projects/scratch/ku_00016/SCOP_2022_0XXX/`
+3.  
+4.  `cd` into sequencing folder and run `bcl2fastq.sh`
+5.  `cd` into fastq-directory and run multiqc: `conda activate tools & multiqc .` & investigate
+6.  Run `add_umi.sh` & `fastq_dir_to_samplesheet.sh`
+7.  Edit the `nextflow.sh` pipeline and run it
 
 **Upon completion of analysis:**
 
