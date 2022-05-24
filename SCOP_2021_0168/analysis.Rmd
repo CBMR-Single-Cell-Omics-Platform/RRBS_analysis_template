@@ -1,0 +1,394 @@
+---
+title: "SCOP_2021_0168: Effect of TADS-score on sperm DNA methylation"
+author: 
+- "Analysis by Thomas Gade Koefoed"
+- "Staff Scientist at the Single-Cell Omics Platform"
+- "thomas.koefoed@sund.ku.dk"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+knit: (function (...) {
+        rmarkdown::render(
+          basename(rstudioapi::getSourceEditorContext()$path), 
+          output_file = paste(
+            format(Sys.time(),'%Y_%m_%d'),
+            tools::file_path_sans_ext(basename(rstudioapi::getSourceEditorContext()$path)),
+            sep="_"), 
+          envir = new.env())})
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    code_folding: hide
+    df_print: paged
+editor_options:
+  chunk_output_type: inline
+---
+
+# Code blocks: Initial data processing {.tabset}
+All code used for the analyses can be found throughout this report by expanding the code-blocks in the .html-file on the right-hand side within the appropriate tabs, or through the associated .Rmd file, where it can also be run. You will have to install all the necessary packages yourself though, which can be non-trivial.
+
+## Document setup
+```{r}
+full_script_name <- rstudioapi::getSourceEditorContext()$path
+script_name <- basename(full_script_name)
+data_dir <- paste0(tools::file_path_sans_ext(full_script_name),"_data/")
+dir.create(data_dir, showWarnings = F)
+```
+
+
+## BiSeq-analysis (Run on Computerome HPC)
+```{r}
+# Rscript biseq_processing_scripts/1_generate_object.R
+# Rscript biseq_processing_scripts/2_cluster_and_limit_cov.R
+# Rscript biseq_processing_scripts/3_smooth_methylation.R
+# Rscript biseq_processing_scripts/4_beta_regression_grouped.R
+# Rscript biseq_processing_scripts/5_null_beta_grouped.R
+# Rscript biseq_processing_scripts/6_trim_and_DMR_grouped.R
+```
+
+## Libraries
+```{r, warning=FALSE}
+source("R/functions.R")
+suppressPackageStartupMessages({
+  library(BiSeq)
+  library(ChIPseeker)
+  library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+  library(tidyverse)
+  library(gridExtra)
+  library(org.Hs.eg.db)
+})
+```
+
+## Data loading & Settings
+```{r, warning=FALSE}
+# read the BiSeq-output files generated on Computerome
+out_dir <- "biseq_output/"
+
+clusters <- readRDS(file.path(out_dir,"clusters_GR.RDS"))
+# cpgs <- readRDS(file.path(out_dir,"clusters_trimmed_grouped.RDS"))
+locCor_continous <- locCor <- readRDS(file.path(out_dir, "locCor_continous.RDS"))
+locCor_grouped <- locCor <- readRDS(file.path(out_dir, "locCor_grouped.RDS"))
+```
+
+## Trim clusters
+```{r, warning=FALSE}
+FDR_vals_to_test <- seq(0.05,0.5,0.05)
+
+trimmed_clusters_list_grouped <- trim_iteratively(locCor = locCor_grouped, FDR_vals = FDR_vals_to_test)
+trimmed_clusters_list_continous <- trim_iteratively(locCor = locCor_continous, FDR_vals = FDR_vals_to_test)
+```
+
+## Plot trimmed clusters
+```{r}
+plot_clusters_list(trimmed_clusters_list_grouped, FDR_vals_to_tested = FDR_vals_to_test) +
+  ggtitle("Grouped")
+plot_clusters_list(trimmed_clusters_list_continous, FDR_vals_to_tested = FDR_vals_to_test) +
+  ggtitle("Continous")
+```
+## P value distributions
+```{r}
+beta_results_null_grouped<- readRDS(file.path(out_dir, "beta_results_null_grouped.RDS"))
+beta_results_grouped <- readRDS(file.path(out_dir, "beta_results_grouped.RDS"))
+
+beta_results_null_continous<- readRDS(file.path(out_dir, "beta_results_null_continous.RDS"))
+beta_results_continous <- readRDS(file.path(out_dir, "beta_results_continous.RDS"))
+
+beta_results_both_grouped <- bind_rows(Null=beta_results_null_grouped,Test=beta_results_grouped, .id="Type")
+beta_results_both_continous <- bind_rows(Null=beta_results_null_continous,Test=beta_results_continous, .id="Type")
+```
+## Plot P-value distributions
+```{r}
+beta_results_both_grouped %>% 
+  ggplot(aes(x=p.val, fill=Type, alpha=0.5, group=Type)) +
+  geom_histogram(position="identity") +
+  theme_bw() +
+  ggtitle("Grouped")
+
+
+beta_results_both_continous %>% 
+  ggplot(aes(x=p.val, fill=Type, alpha=0.5)) +
+  geom_histogram(position="identity") +
+  theme_bw() +
+  ggtitle("Continous")
+```
+# Make DMRs
+```{r}
+cpgs <- trimmed_clusters_list_grouped %>% 
+  lapply(rownames_to_column) %>% 
+  bind_rows(.id="FDR threshold") %>% 
+  arrange(`FDR threshold`) %>% 
+  distinct(rowname, .keep_all = T)
+
+
+DMRs_strict <- findDMRs(cpgs %>% dplyr::filter(`FDR threshold`<=0.25), 
+                        max.dist = 100,
+                        diff.dir = TRUE)
+DMRs_strict
+
+DMRs_lenient <- findDMRs(cpgs,
+                         max.dist = 100,
+                         diff.dir = TRUE)
+DMRs_lenient
+```
+
+```{r, warning=FALSE}
+DMRs <- readRDS(file.path(out_dir, "DMRs_grouped.RDS"))
+predicted_meth <- readRDS(file.path(out_dir, "predicted_meth.RDS"))
+
+# we pre-process the data
+cpgs$chr <- factor(cpgs$chr, levels=gtools::mixedsort(unique(cpgs$chr)))
+cpgs$cluster.id <- factor(cpgs$cluster.id, 
+                          levels=gtools::mixedsort(unique(cpgs$cluster)))
+cpgs$Pos <- factor(paste(cpgs$chr, cpgs$pos, sep=":"), 
+                   levels=gtools::mixedsort(paste(cpgs$chr, cpgs$pos, sep=":")))
+seqlevelsStyle(DMRs) <- "NCBI"
+
+group_labels <- c(meth.group1="High.TADS", meth.group2="Low.TADS")
+```
+
+# Results: Differential methylation of CpGs between the high and low TADS-group
+To generate these results we used the Bismark software to generate methylation coverage files from the sequencing data. We then processed these using the BiSeq R-package, using the scripts supplied in the biseq_proceesing_scripts directory.
+
+In short, we  first used the recommended false-discovery rate (FDR) threshold of 10 % for detecting CpG-clusters containing at least one significantly differentially methylated CpG. During the second filtering step, we used a very lenient 50 % FDR threshold (recommended is 5 %) in order to retain >0 significant differentially methylated CpGs in the previously identified clusters.
+
+This of course necessitates great care when interpreting results.
+
+## General statistics
+From the analysis, we find a total of `r nrow(cpgs)` significant differentially methylated cytosines (in the CpG-context). These CpGs are found in `r length(unique(cpgs$cluster.id))` clusters, which form `r length(DMRs)` differentially methylated regions (DMRs). A cluster is broken up into several DMRs if the direction of differential methylation between the groups changes along the cluster. See the below table for an overview:
+```{r}
+clusters_pr_chromosome <- cpgs %>% 
+  dplyr::select(chr, cluster.id) %>% 
+  dplyr::distinct() %>% 
+  dplyr::group_by(chr) %>% 
+  dplyr::summarise(`No. of sign. CpG-clusters` =n())
+
+CpGs_pr_chromosome <- cpgs %>% 
+  dplyr::group_by(chr) %>% 
+  summarise(`No. of sign. CpGs`=n())
+
+DMRs_pr_chromosome <- seqnames(DMRs) %>% 
+  table() %>% 
+  enframe(name="chr", value = "No. of sign. DMRs") %>% 
+  mutate(`No. of sign. DMRs`=as.integer(`No. of sign. DMRs`))
+
+combined_data_frame <- clusters_pr_chromosome %>% 
+  left_join(DMRs_pr_chromosome,by="chr") %>% 
+  left_join(CpGs_pr_chromosome, by="chr")
+
+combined_data_frame
+```
+
+## Table of all significantly differentially methylated CpGs
+Below is table of all the found significantly differentially methylated CpGs. Here, you can see the various methylation statistics of the CpGs in the high and low TADS-group respectively. Note that the first P-value is the P-value of the first, cluster-wise statistical testing, while the second P-value (p.li) is the P-value for the specific CpG, obtained in the second testing step.
+
+Furthermore, there is information about the nearest gene of each CpG. All genomic information is for the GRCh38-assembly. You can sort, filter and export the tables directly from the .html as you wish. You can also choose which columns to display using the "Column visibility" button.
+
+```{r, warning=F, message=F}
+txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene
+gr <-  GRanges(seqnames = Rle(paste0("chr",cpgs$chr)), ranges = IRanges(start=cpgs$pos, end = cpgs$pos))
+
+peakAnno <- annotatePeak(gr, tssRegion=c(-3000, 3000),
+                         TxDb=txdb, annoDb="org.Hs.eg.db", verbose = F)
+cpg_annotations <- as.data.frame(peakAnno)
+
+cpgs_with_info_formatted <- cpgs %>% 
+  dplyr::select(meth.group1,meth.group2,
+                cluster.id, pos, p.val, p.li, `FDR threshold`) %>% 
+  mutate(pos=as.integer(pos)) %>% 
+  mutate(across(.cols=where(is.double), ~ signif(.x, 2))) %>% 
+  mutate(closestGene=cpg_annotations$SYMBOL,
+         inPart=cpg_annotations$annotation,
+         TSSDist.=cpg_annotations$distanceToTSS) %>% 
+  dplyr::rename_with(.fn = ~ case_when(.x=="meth.group1" ~ group_labels[[1]], 
+                                       .x=="meth.group2" ~ group_labels[[2]],
+                                       TRUE ~ .x))
+
+DT <- cpgs_with_info_formatted %>% 
+  arrange(cluster.id) %>% 
+  relocate(pos) %>% 
+  DT::datatable(
+    extensions = 'Buttons',
+    filter = "top",
+    rownames = FALSE,
+    options = list(
+      dom = 'Bfrtip',
+      buttons = c('copy', 'csv', 'excel', 'colvis')
+    )
+  )
+DT
+```
+
+## Table of differentially methylated regions (DMRs)
+Similarly, we can make a table of the differentially methylated regions (DMRs):
+### FDR(<0.25)
+```{r, message=F, warning=F}
+seqlevelsStyle(DMRs_strict) <- "UCSC"
+peakAnno_DMRs_strict <- annotatePeak(DMRs_strict, tssRegion=c(-3000, 3000),
+                                     TxDb=txdb, annoDb="org.Hs.eg.db", verbose = F)
+
+cpg_annotations_DMRs_strict <- as.data.frame(peakAnno_DMRs_strict)
+
+DMRs_strict_formatted_with_info <- DMRs_strict %>% as_tibble() %>% 
+  dplyr::rename(chr=seqnames) %>% 
+  dplyr::select(-strand, -width) %>%
+  mutate(across(c(median.meth.group1, median.meth.group2, median.meth.diff, median.p),
+                ~signif(.x, 2)),
+         closestGene=cpg_annotations_DMRs_strict$SYMBOL,
+         inPart=cpg_annotations_DMRs_strict$annotation,
+         TSSDist.=cpg_annotations_DMRs_strict$distanceToTSS) %>% 
+  dplyr::rename_with(.fn = ~ case_when(.x=="median.meth.group1" ~ paste0("median.",group_labels[[1]]), 
+                                       .x=="median.meth.group2" ~ paste0("median.",group_labels[[2]]),
+                                       TRUE ~ .x))
+
+DT_DMRs <- DMRs_strict_formatted_with_info %>% 
+  arrange(chr, start) %>% 
+  DT::datatable(
+    extensions = 'Buttons',
+    filter = "top",
+    rownames = FALSE,
+    options = list(
+      dom = 'Bfrtip',
+      buttons = c('copy', 'csv', 'excel', 'colvis')
+    )
+  )
+DT_DMRs
+```
+### FDR(<0.50)
+```{r, message=F, warning=F}
+seqlevelsStyle(DMRs_lenient) <- "UCSC"
+peakAnno_DMRs_lenient <- annotatePeak(DMRs_lenient, tssRegion=c(-3000, 3000),
+                                      TxDb=txdb, annoDb="org.Hs.eg.db", verbose = F)
+
+cpg_annotations_DMRs_lenient <- as.data.frame(peakAnno_DMRs_lenient)
+
+DMRs_lenient_formatted_with_info <- DMRs_lenient %>% as_tibble() %>% 
+  dplyr::rename(chr=seqnames) %>% 
+  dplyr::select(-strand, -width) %>%
+  mutate(across(c(median.meth.group1, median.meth.group2, median.meth.diff, median.p),
+                ~signif(.x, 2)),
+         closestGene=cpg_annotations_DMRs_lenient$SYMBOL,
+         inPart=cpg_annotations_DMRs_lenient$annotation,
+         TSSDist.=cpg_annotations_DMRs_lenient$distanceToTSS) %>% 
+  dplyr::rename_with(.fn = ~ case_when(.x=="median.meth.group1" ~ paste0("median.",group_labels[[1]]), 
+                                       .x=="median.meth.group2" ~ paste0("median.",group_labels[[2]]),
+                                       TRUE ~ .x))
+
+DT_DMRs_lenient <- DMRs_lenient_formatted_with_info %>% 
+  arrange(chr, start) %>% 
+  DT::datatable(
+    extensions = 'Buttons',
+    filter = "top",
+    rownames = FALSE,
+    options = list(
+      dom = 'Bfrtip',
+      buttons = c('copy', 'csv', 'excel', 'colvis')
+    )
+  )
+DT_DMRs_lenient
+```
+
+## Visualization of significant differentially methylated CpGs {.tabset}
+In the aggregated tab below, each bar represents a significantly differentially methylated CpG along with its methylation levels in the two investigated groups.
+
+In the per sample tab, each figure shows a CpG cluster and the the methylation level at the contained CpGs in each sample for the two different groups. 
+
+### Aggregated
+```{r, fig.asp=0.4}
+long_cpgs <- cpgs %>% 
+  dplyr::mutate(strict=`FDR threshold`<=0.25)%>% 
+  mutate(index=1:nrow(cpgs), 
+         my_pos=factor(paste(chr, pos))) %>% 
+  pivot_longer(cols=c(meth.group1,meth.group2),
+               values_to = "methylation",
+               names_to = "group") %>% 
+  dplyr::mutate(group =case_when(group=="meth.group1" ~ group_labels[[1]], 
+                                 group=="meth.group2" ~ group_labels[[2]],
+                                 TRUE ~ group))
+
+
+plot <- long_cpgs %>%
+  ggplot(aes(x=Pos, y = methylation, fill = group, label=chr, alpha=`FDR threshold`<=0.25)) +
+  
+  geom_bar(stat="identity",position = "dodge") +
+  
+  scale_y_continuous(name = "Methylation", 
+                     labels = scales::percent_format(), limits = c(0,1)) +
+  scale_fill_manual(values = setNames(object = c("red","blue"), nm= group_labels)) +
+  
+  xlab("CpGs by chr and base number.") +
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 90)) + 
+  scale_alpha_manual(values=setNames(c(1, 0.25), c(TRUE, FALSE))) +
+  theme(legend.position = c(0.2,0.7))
+
+plot
+```
+
+### Per sample (1 panel for each cluster)
+```{r, warning=F}
+# useful vectors
+meth.group1_indices <- which(predicted_meth$group==levels(as.factor(predicted_meth$group))[1])
+meth.group2_indices <- which(predicted_meth$group==levels(as.factor(predicted_meth$group))[2])
+```
+
+```{r, warning=F}
+# Build dataframe for each cluster, containing predicted methylation for contained CpGs as well as their group-status and IDs.
+cluster_specific_cpg_list <- list()
+for (cluster in gtools::mixedsort(unique(cpgs$cluster.id))) {
+  filtered_cpgs <- cpgs %>% 
+    dplyr::filter(cluster.id == cluster)
+  
+  # make a dataframe for each CpG (containing the samples)
+  cpg_list <- list()
+  for (i in 1:nrow(filtered_cpgs)) {
+    
+    cpg_ID <- get_cpg_no_from_pos(rrbs_object = predicted_meth,
+                                  chr = as.character(filtered_cpgs[i,]$chr), 
+                                  pos = filtered_cpgs[i,]$pos)
+    
+    meth_metrics <- get_methylation_levels(predicted_meth,
+                                           cpg_ID,
+                                           meth.group1_indices,
+                                           meth.group2_indices)
+    
+    
+    cpg_cluster_metylation_levels <- tibble("id" = rep(i, ncol(predicted_meth)),
+                                            "chr" = filtered_cpgs[i,]$chr,
+                                            "Pos" = factor(paste(filtered_cpgs[i,]$chr, 
+                                                                 filtered_cpgs[i,]$pos, sep=":"), 
+                                                           levels=gtools::mixedsort(paste(filtered_cpgs[i,]$chr,
+                                                                                          filtered_cpgs[i,]$pos, sep=":"))
+                                            ),
+                                            
+                                           "strict"=filtered_cpgs[i,]$`FDR threshold`<=0.25,
+                                            "pos" = filtered_cpgs[i,]$pos,
+                                            "methylation" = c(meth_metrics[[1]], meth_metrics[[2]]), 
+                                            "group" = c(rep(group_labels[1], length(meth.group1_indices)), 
+                                                        rep(group_labels[2],length(meth.group2_indices))))
+    cpg_list[[i]] <- cpg_cluster_metylation_levels
+  }
+  # bind dataframes of each CpG into a total-cluster CpG list
+  cluster_specific_cpg_list[[as.character(cluster)]] <- bind_rows(cpg_list)
+}
+methylation_per_CpGs <- cluster_specific_cpg_list %>% bind_rows(.id = "Cluster")
+```
+
+
+```{r, fig.asp=0.4}
+methylation_per_CpGs %>% 
+  ggplot(aes(x=Pos, 
+             y = methylation, 
+             color = group,
+             alpha=strict)) +
+  geom_jitter(width = 0.1, size=1) +
+  scale_y_continuous(name = "Methylation", labels = scales::percent_format(),
+                     limits = c(0,1)) +
+  scale_color_manual(values = setNames(object = c("red","blue"), nm= group_labels)) +
+  scale_x_discrete() +
+  xlab("Significant CpGs in cluster") +
+  theme_bw() +
+  theme(legend.position = c(0.3,0.7)) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  scale_alpha_manual(values=setNames(c(0.5, 0.5), c(TRUE, FALSE)))
+```
+
