@@ -64,14 +64,13 @@ suppressPackageStartupMessages({
 # read the BiSeq-output files generated on Computerome
 out_dir <- "biseq_output/"
 
-clusters <- readRDS(file.path(out_dir,"clusters_GR.RDS"))
-# cpgs <- readRDS(file.path(out_dir,"clusters_trimmed_grouped.RDS"))
 locCor_continous <- locCor <- readRDS(file.path(out_dir, "locCor_continous.RDS"))
 locCor_grouped <- locCor <- readRDS(file.path(out_dir, "locCor_grouped.RDS"))
 ```
 
 ## Trim clusters
 ```{r, warning=FALSE}
+#yes
 FDR_vals_to_test <- seq(0.05,0.5,0.05)
 
 trimmed_clusters_list_grouped <- trim_iteratively(locCor = locCor_grouped, FDR_vals = FDR_vals_to_test)
