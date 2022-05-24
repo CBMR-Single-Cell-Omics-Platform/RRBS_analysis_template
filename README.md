@@ -1,8 +1,8 @@
-# RRBS analysis template using Biseq
+# Bulk mRNA-seq analysis template using EdgeR
 
-A template for analyzing RRBS results using Bismark & BiSeq.
+A template for analyzing a Universal Plus mRNA-seq with Nuquant using EdgeR.
 
-The main analysis itself is written in the form a .Rmd-file, which contains both code and interactive output for the user.
+The analysis itself is written in the form a .Rmd-file, which contains both code and interactive output for the user.
 
 **Purpose and contents of directories in this repository:**
 
@@ -18,17 +18,34 @@ The main analysis itself is written in the form a .Rmd-file, which contains both
 
 **Pre-processing steps before analysis:**
 
-1.  On Yggdrasil/Nidhogg, Move 01_BCL/SampleSheet.csv into sequencing folder
-2.  copy sequencing folder (name found in Trello) from seq-drive to SCOP-project dir (when mounted) as well as computerome
-    -   mount: `mount_SCOP_share SCOP_2022_0XXX`
-    -   CP to project dir `cp /data/SCOP/seq3/tqb695/XXXXXXXX /data/SCOP/SCOP_2022_0XXX/tqb695/RNAseq/01_BCL/`
-    -   create folder on computerome `ssh thokoe@ssh.computerome.dk 'mkdir -p /home/projects/scratch/ku_00016/SCOP_2022_0XXX'`
-    -   cp to computerome: `scp /data/SCOP/seq3/tqb695/XXXXXXXXX thokoe@ssh.computerome.dk:/home/projects/scratch/ku_00016/SCOP_2022_0XXX/`
-3.  
-4.  `cd` into sequencing folder and run `bcl2fastq.sh`
-5.  `cd` into fastq-directory and run multiqc: `conda activate tools & multiqc .` & investigate
-6.  Run `add_umi.sh` & `fastq_dir_to_samplesheet.sh`
-7.  Edit the `nextflow.sh` pipeline and run it
+1.  On Yggdrasil, copy sequencing folder (name found in Trello) from seq-drive to SCOP-project dir (when mounted)
+
+    ```{bash}
+    mount_SCOP_share SCOP_2022_XXXX
+    cp /data/SCOP/seq3/tqb695/XXXXXXXXX /data/SCOP/SCOP_2022_XXXX/tqb695/RNAseq/01_BCL/
+    ```
+
+2.  Move 01_BCL/SampleSheet.csv into sequencing folder
+
+3.  `cp` **01_BCL_bcl2fastq.sh** into sequencing folder and run it
+
+4.  `cd` into fastq-directory and run **multiqc** & investigate
+
+    ```{bash}
+    conda activate tools & multiqc .
+    ```
+
+5.  If good, `cp` **02_FASTQ_add_umi_loop.sh** & **02_FASTQ_add_umi.sh** into fastq-directory and run the former
+
+6.  Make directory on Ygg scratch, and `cp` and edit **scrach_fastq_dir_to_samplesheet.sh** & **scratch**\_**fastq_dir_to_samplesheet.py** to this and run the former.
+
+7.  `cp` and edit the **scratch_nextflow.sh** into same dir and run it
+
+8.  Run multiqc
+
+    ```{bash}
+    conda activate tools & multiqc .
+    ```
 
 **Upon completion of analysis:**
 
