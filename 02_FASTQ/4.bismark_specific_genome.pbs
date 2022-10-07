@@ -1,0 +1,24 @@
+#!/bin/sh
+#PBS -W group_list=ku_00016 -A ku_00016
+#PBS -m ae
+#PBS -M thomas.koefoed@sund.ku.dk
+#PBS -l nodes=1:ppn=40
+#PBS -l walltime=48:00:00
+
+GENOME=/home/projects/ku_00016/data/genome_data/bismarkIndexes/hg38_GRCh38_release103/
+export GENOME
+
+# DESCRIPTION:
+# RUN BISMARK WITH DEFAULT SETTINGS ON FASTQ FILES (*R1_001.UMI_trimmed.fq_trimmed.fq.gz)
+# OUTPUTS BAM FILES (*R1_001.UMI_trimmed.fq_trimmed_bismark_bt2.bam)
+
+module load tools ngs
+module load parallel/20210722
+module load samtools/1.13 bowtie2/2.4.2 bismark/0.23.0
+
+cd $PBS_O_WORKDIR
+
+parallel --max-procs=10 \
+'bismark -o ../03_PipelineOut/bismark/ \
+$GENOME {}' ::: ./*_trimmed.fq_trimmed.fq.gz
+

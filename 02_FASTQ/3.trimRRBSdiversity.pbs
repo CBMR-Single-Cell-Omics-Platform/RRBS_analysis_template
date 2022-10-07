@@ -1,0 +1,24 @@
+#!/bin/sh
+#PBS -W group_list=ku_00016 -A ku_00016
+#PBS -m ae
+#PBS -M thomas.koefoed@sund.ku.dk
+#PBS -l nodes=1:ppn=40
+#PBS -l walltime=36:00:00
+
+# DESCRIPTION: 
+# RUN IN THE FASTQ DIR READING FASTQ FILES (*R1_001.UMI_trimmed.fastq.gz)
+# USE THE trimRRBSdiversityAdaptCustomers.py AS SUPPLIED BY NUGENT TO REMOVE INSERTED ADAPTRS
+# DURING RESTRICTION ENZYME CUTTING, OUTPUTTING (*R1_001.UMI_trimmed.fq_trimmed.fq.gz)
+
+module load tools ngs
+module load parallel/20210722
+
+cd $PBS_O_WORKDIR
+
+my_func() {
+    python2 trimRRBSdiversityAdaptCustomers.py -1 $1
+}
+export -f my_func
+parallel --max-procs=40 my_func ::: ./*UMI_trimmed.fq.gz 
+
+

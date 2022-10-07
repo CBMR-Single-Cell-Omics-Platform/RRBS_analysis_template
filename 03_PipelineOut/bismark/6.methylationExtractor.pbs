@@ -1,0 +1,23 @@
+#!/bin/sh
+#PBS -W group_list=ku_00016 -A ku_00016
+#PBS -m ae
+#PBS -M thomas.koefoed@sund.ku.dk
+#PBS -l nodes=1:ppn=40
+#PBS -l walltime=16:00:00
+
+# DESCRIPTION
+# GENERATES METHYLATION COVERAGE FROM DEDUPLICATED BISMARK BAM FILES (*R1_001.UMI_trimmed.fq_trimmed_bismark_bt2.bam))
+# OUTPUTS *bedGraph.gz and *bismark.cov.gz
+# Go to the directory from where the job was submitted (initial directory is $HOME)
+module load tools ngs
+module load parallel/20210722
+module load samtools/1.13 bowtie2/2.4.2 bismark/0.23.0
+
+cd $PBS_O_WORKDIR
+
+my_func() {
+    bismark_methylation_extractor --ignore 3 --bedGraph $1
+}
+export -f my_func
+parallel --max-procs=40 my_func ::: $(find ./ -name \*deduplicated.bam)
+

@@ -1,0 +1,28 @@
+#!/bin/sh
+#PBS -W group_list=ku_00016 -A ku_00016
+#PBS -m ae
+#PBS -M thomas.koefoed@sund.ku.dk
+#PBS -l nodes=1:ppn=40
+#PBS -l mem=120gb
+#PBS -l walltime=4:00:00
+
+# DESCRIPTION:
+# RUNS FROM THE SEQUENCING FOLDER
+# OUTPUTS DEMULTIPLEXED FASTQS IN 02_FASTQ DIR ACCORDING TO PROJECT-SHARE SETUP
+# READ 1 CORRESPONDS TO ACTUAL FRAGMENTS
+# READ 2 CORRESPONDS TO 6 BASE LONG UMI
+# DOES NOT IMPOSE MINIMUM LENGTH FOR READS
+
+cd $PBS_O_WORKDIR
+
+module load tools
+module load bcl2fastq/2.20.0
+
+bcl2fastq -R . \
+-o ../../02_FASTQ/ \
+-r 10 -w 10 -p 20 \
+--use-bases-mask Y*,I8Y6 \
+--mask-short-adapter-reads 0 \
+--minimum-trimmed-read-length 0 \
+--no-lane-splitting
+

@@ -1,0 +1,26 @@
+#!/bin/sh
+#PBS -W group_list=ku_00016 -A ku_00016
+#PBS -m ae
+#PBS -M thomas.koefoed@sund.ku.dk
+#PBS -l nodes=1:ppn=40
+#PBS -l walltime=24:00:00
+
+# DESCRIPTION:
+# RUNS FROM THE FASTQ DIR AND READS IN FILES (*R1_001.fastq.gz)
+# OUTPUTS NEW R1 READS (*R1_001.UMI.fastq.gz) WITH THE UMIS FROM R2 APPENEDED BY COLON IN THE HEADER
+
+
+cd $PBS_O_WORKDIR
+
+module load tools ngs
+module load parallel/20210722
+module load anaconda3/2021.05
+
+
+my_func() {
+     python addUMI.py $1
+}
+
+export -f my_func
+parallel --max-procs=40 my_func ::: *R1_001.fastq.gz
+
